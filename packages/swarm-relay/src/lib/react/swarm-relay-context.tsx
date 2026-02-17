@@ -70,19 +70,24 @@ export function SwarmRelayProvider<TEventMap extends EventMap>({
   // Keep latest callbacks in refs so the relay never goes stale.
   const onStateChangeRef = useRef(externalOnStateChange);
   onStateChangeRef.current = externalOnStateChange;
+
   const onErrorRef = useRef(externalOnError);
   onErrorRef.current = externalOnError;
 
   useEffect(() => {
+    let cancelled = false;
+
     const relay = new SwarmRelay<TEventMap>({
       clientId,
       transport,
       logger,
       onStateChange: (newState) => {
+        if (cancelled) return;
         setState(newState);
         onStateChangeRef.current?.(newState);
       },
       onError: (err) => {
+        if (cancelled) return;
         setError(err);
         onErrorRef.current?.(err);
       },
@@ -92,11 +97,13 @@ export function SwarmRelayProvider<TEventMap extends EventMap>({
 
     if (autoConnect) {
       relay.connect().catch((err: unknown) => {
+        if (cancelled) return;
         setError(err instanceof Error ? err : new Error(String(err)));
       });
     }
 
     return () => {
+      cancelled = true;
       relay.disconnect();
       relayRef.current = null;
     };

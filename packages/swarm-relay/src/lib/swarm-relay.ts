@@ -69,11 +69,12 @@ export class SwarmRelay<TEventMap extends EventMap> {
   >();
   private readonly wildcardHandlers = new Set<WildcardHandler<TEventMap>>();
   private _state: ConnectionState = ConnectionState.Disconnected;
+  private _aborted = false;
 
   constructor(options: SwarmRelayOptions<TEventMap>) {
     this.clientId = options.clientId;
     this.transport =
-      options.transport ?? new SharedWorkerTransport<TEventMap>();
+      options.transport ?? new SharedWorkerTransport<TEventMap>(this.clientId);
     this.logger = options.logger ?? defaultLogger;
     this.onStateChange = options.onStateChange;
     this.onErrorCallback = options.onError;
@@ -101,6 +102,7 @@ export class SwarmRelay<TEventMap extends EventMap> {
       return;
     }
 
+    this._aborted = false;
     this.setState(ConnectionState.Connecting);
     this.logger.info(`Connecting as "${this.clientId}"…`);
 
@@ -108,9 +110,17 @@ export class SwarmRelay<TEventMap extends EventMap> {
       this.transport.onMessage(this.handleMessage);
       this.transport.onError(this.handleError);
       await this.transport.connect(this.clientId);
+
+      // disconnect() may have been called while we were awaiting.
+      if (this._aborted) return;
+
       this.setState(ConnectionState.Connected);
       this.logger.info(`Connected as "${this.clientId}"`);
     } catch (error) {
+      // If disconnect() was called mid-connect, swallow the error
+      // — the caller already knows the relay is being torn down.
+      if (this._aborted) return;
+
       this.setState(ConnectionState.Error);
       const relayError =
         error instanceof SwarmRelayError
@@ -134,6 +144,9 @@ export class SwarmRelay<TEventMap extends EventMap> {
     if (this._state === ConnectionState.Disconnected) {
       return;
     }
+
+    // Signal any in-progress connect() to bail out silently.
+    this._aborted = true;
 
     this.logger.info(`Disconnecting "${this.clientId}"…`);
     this.transport.offMessage(this.handleMessage);

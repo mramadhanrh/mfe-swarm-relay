@@ -14,6 +14,9 @@ export default defineConfig(() => ({
     host: 'localhost',
   },
   plugins: [react()],
+  resolve: {
+    conditions: ['@org/source'],
+  },
   // Uncomment this if you are using workers.
   // worker: {
   //  plugins: [],

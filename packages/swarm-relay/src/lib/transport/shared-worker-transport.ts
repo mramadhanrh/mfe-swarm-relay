@@ -7,6 +7,37 @@ import {
 import { SwarmRelayError, SwarmRelayErrorCode } from '../errors.js';
 import { getWorkerScript } from '../worker/swarm-relay-worker.js';
 
+// ── Singleton SharedWorker Blob URL ────────────────────────
+//
+// Every SharedWorkerTransport instance must connect to the **same**
+// underlying SharedWorker so messages can be routed between clients.
+// SharedWorkers are keyed by URL + name — a shared Blob URL guarantees
+// all instances hit the same worker global scope.
+
+let sharedBlobUrl: string | null = null;
+
+function getOrCreateBlobUrl(): string {
+  if (!sharedBlobUrl) {
+    const blob = new Blob([getWorkerScript()], {
+      type: 'application/javascript',
+    });
+    sharedBlobUrl = URL.createObjectURL(blob);
+  }
+  return sharedBlobUrl;
+}
+
+/** @internal Test-only — resets the singleton so each test starts fresh. */
+export function __resetSharedBlobUrl__(): void {
+  if (sharedBlobUrl) {
+    try {
+      URL.revokeObjectURL(sharedBlobUrl);
+    } catch {
+      // May not exist in test environments.
+    }
+    sharedBlobUrl = null;
+  }
+}
+
 /**
  * Transport adapter backed by a SharedWorker.
  *
@@ -29,7 +60,12 @@ export class SharedWorkerTransport<TEventMap extends EventMap>
   >();
   private errorHandlers = new Set<(error: Error) => void>();
   private _state: ConnectionState = ConnectionState.Disconnected;
-  private blobUrl: string | null = null;
+  private handshakeAbort: (() => void) | null = null;
+  private clientId: string;
+
+  constructor(clientId: string) {
+    this.clientId = clientId;
+  }
 
   get state(): ConnectionState {
     return this._state;
@@ -51,12 +87,10 @@ export class SharedWorkerTransport<TEventMap extends EventMap>
     this._state = ConnectionState.Connecting;
 
     try {
-      const blob = new Blob([getWorkerScript()], {
-        type: 'text/javascript',
-      });
-      this.blobUrl = URL.createObjectURL(blob);
-      this.worker = new SharedWorker(this.blobUrl, {
+      const blobUrl = getOrCreateBlobUrl();
+      this.worker = new SharedWorker(blobUrl, {
         name: 'swarm-relay-hub',
+        type: 'classic',
       });
       this.port = this.worker.port;
 
@@ -79,6 +113,13 @@ export class SharedWorkerTransport<TEventMap extends EventMap>
   }
 
   disconnect(): void {
+    // Cancel any in-progress handshake immediately so the pending
+    // connect() promise rejects without waiting for the 5 s timeout.
+    if (this.handshakeAbort) {
+      this.handshakeAbort();
+      this.handshakeAbort = null;
+    }
+
     if (this.port) {
       try {
         this.port.postMessage({ type: '__swarm_disconnect__' });
@@ -135,6 +176,7 @@ export class SharedWorkerTransport<TEventMap extends EventMap>
   private handshake(clientId: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
+        this.handshakeAbort = null;
         reject(
           new SwarmRelayError(
             'SharedWorker registration timed out',
@@ -143,11 +185,23 @@ export class SharedWorkerTransport<TEventMap extends EventMap>
         );
       }, 5_000);
 
+      // Allow disconnect() to abort the handshake immediately.
+      this.handshakeAbort = () => {
+        clearTimeout(timeout);
+        reject(
+          new SwarmRelayError(
+            'Connection aborted',
+            SwarmRelayErrorCode.ConnectionFailed
+          )
+        );
+      };
+
       this.port!.onmessage = (event: MessageEvent) => {
         const data = event.data;
 
         if (data.type === '__swarm_registered__') {
           clearTimeout(timeout);
+          this.handshakeAbort = null;
           // Switch to the permanent message handler.
           this.port!.onmessage = this.handlePortMessage;
           resolve();
@@ -166,8 +220,9 @@ export class SharedWorkerTransport<TEventMap extends EventMap>
 
       this.worker!.onerror = (e: ErrorEvent) => {
         clearTimeout(timeout);
+        this.handshakeAbort = null;
         const error = new SwarmRelayError(
-          `SharedWorker error: ${e.message}`,
+          `SharedWorker error: ${e.message ?? 'unknown'}`,
           SwarmRelayErrorCode.TransportError
         );
         this._state = ConnectionState.Error;
@@ -197,10 +252,8 @@ export class SharedWorkerTransport<TEventMap extends EventMap>
   private cleanup(): void {
     this.port = null;
     this.worker = null;
-    if (this.blobUrl) {
-      URL.revokeObjectURL(this.blobUrl);
-      this.blobUrl = null;
-    }
+    // Do NOT revoke the shared blob URL — it is a module-level singleton
+    // reused by every SharedWorkerTransport instance.
     this.messageHandlers.clear();
     this.errorHandlers.clear();
   }

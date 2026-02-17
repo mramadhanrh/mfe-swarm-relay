@@ -1,4 +1,7 @@
-import { SharedWorkerTransport } from './shared-worker-transport.js';
+import {
+  SharedWorkerTransport,
+  __resetSharedBlobUrl__,
+} from './shared-worker-transport.js';
 import { ConnectionState } from '../types.js';
 import { SwarmRelayError, SwarmRelayErrorCode } from '../errors.js';
 
@@ -60,7 +63,10 @@ function restoreSharedWorkerMock(): void {
 
 describe('SharedWorkerTransport', () => {
   beforeEach(() => installSharedWorkerMock());
-  afterEach(() => restoreSharedWorkerMock());
+  afterEach(() => {
+    __resetSharedBlobUrl__();
+    restoreSharedWorkerMock();
+  });
 
   it('should start in Disconnected state', () => {
     const t = new SharedWorkerTransport();

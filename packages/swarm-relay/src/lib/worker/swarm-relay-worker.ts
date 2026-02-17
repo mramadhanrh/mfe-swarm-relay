@@ -33,7 +33,12 @@ self.onconnect = function handleConnect(e) {
     // --- Disconnection ---
     if (data.type === '__swarm_disconnect__') {
       if (clientId) {
-        ports.delete(clientId);
+        // Only remove if this port is still the registered one.
+        // A newer connection for the same clientId (e.g. React StrictMode
+        // remount) may have already replaced us in the map.
+        if (ports.get(clientId) === port) {
+          ports.delete(clientId);
+        }
         clientId = null;
       }
       return;
@@ -62,7 +67,9 @@ self.onconnect = function handleConnect(e) {
 
   port.onmessageerror = function handleError() {
     if (clientId) {
-      ports.delete(clientId);
+      if (ports.get(clientId) === port) {
+        ports.delete(clientId);
+      }
       clientId = null;
     }
   };

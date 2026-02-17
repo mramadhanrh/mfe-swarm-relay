@@ -34,11 +34,19 @@ export function useSwarmEvent<
   handlerRef.current = handler;
 
   useEffect(() => {
-    if (!relay) return;
+    if (!relay) {
+      console.warn(
+        'useSwarmEvent: SwarmRelay is not initialised. Subscription skipped.',
+        { event }
+      );
+      return;
+    }
 
     const stableHandler: MessageHandler<TEventMap, K> = (payload, message) => {
       handlerRef.current(payload, message);
     };
+
+    console.log(`Subscribing to "${event}"`, { clientId: relay.id });
 
     return relay.on(event, stableHandler);
   }, [relay, event]);
