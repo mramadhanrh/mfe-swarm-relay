@@ -36,14 +36,14 @@ export default defineConfig(() => ({
     },
     rollupOptions: {
       // External packages that should not be bundled into your library.
-      external: [],
+      external: ['react', 'react-dom', 'react/jsx-runtime'],
     },
   },
   test: {
     name: '@org/swarm-relay',
     watch: false,
     globals: true,
-    environment: 'node',
+    environment: 'jsdom',
     include: ['{src,tests}/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
     reporters: ['default'],
     coverage: {

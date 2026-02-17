@@ -38,6 +38,10 @@ export default [
               sourceTag: 'scope:strings',
               onlyDependOnLibsWithTags: ['scope:shared', 'scope:strings'],
             },
+            {
+              sourceTag: 'scope:swarm-relay',
+              onlyDependOnLibsWithTags: ['scope:shared', 'scope:swarm-relay'],
+            },
           ],
         },
       ],
