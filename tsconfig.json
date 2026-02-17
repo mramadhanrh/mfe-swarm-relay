@@ -14,6 +14,15 @@
     },
     {
       "path": "./packages/utils"
+    },
+    {
+      "path": "./apps/playground-e2e"
+    },
+    {
+      "path": "./apps/playground"
+    },
+    {
+      "path": "./packages/swarm-relay"
     }
   ]
 }
